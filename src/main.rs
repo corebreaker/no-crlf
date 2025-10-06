@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
+use binaryornot::is_binary;
 use clap::Parser;
 use log::{debug, error, info, trace, warn};
-use std::fs;
-use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// A CLI tool to convert CRLF line endings to LF in text files
 #[derive(Parser, Debug)]
@@ -20,10 +23,6 @@ struct Args {
     /// Dry run mode - show what would be changed without modifying files
     #[arg(short = 'n', long, default_value_t = false)]
     dry_run: bool,
-
-    /// Skip hidden files and directories
-    #[arg(long, default_value_t = true)]
-    skip_hidden: bool,
 }
 
 fn main() {
@@ -33,8 +32,7 @@ fn main() {
     let args = Args::parse();
 
     info!("Starting CRLF to LF conversion");
-    info!("Options: recursive={}, dry_run={}, skip_hidden={}", 
-          args.recursive, args.dry_run, args.skip_hidden);
+    info!("Options: recursive={recursive}, dry_run={dry_run}", recursive = args.recursive, dry_run = args.dry_run);
     info!("Processing {} path(s)", args.paths.len());
 
     let mut total_files = 0;
@@ -43,14 +41,14 @@ fn main() {
 
     // Process each path provided
     for path in &args.paths {
-        trace!("Processing path: {:?}", path);
+        debug!("Processing path: {}", path.display());
 
         match process_path(path, &args, &mut total_files, &mut converted_files) {
             Ok(_) => {
-                trace!("Successfully processed path: {:?}", path);
+                info!("Processed path: {}", path.display());
             }
             Err(e) => {
-                error!("Failed to process path {:?}: {}", path, e);
+                error!("Failed to process path {path}: {e}", path = path.display());
                 errors += 1;
             }
         }
@@ -58,48 +56,38 @@ fn main() {
 
     // Summary
     info!("Conversion complete");
-    info!("Total text files processed: {}", total_files);
-    info!("Files converted: {}", converted_files);
+    info!("Total text files processed: {total_files}");
+    info!("Files converted: {converted_files}");
 
     if errors > 0 {
-        warn!("Errors encountered: {}", errors);
+        warn!("Errors encountered: {errors}");
         std::process::exit(1);
     }
 }
 
 /// Process a single path (file or directory)
-fn process_path(
-    path: &Path,
-    args: &Args,
-    total_files: &mut usize,
-    converted_files: &mut usize,
-) -> Result<()> {
+fn process_path(path: &Path, args: &Args, total_files: &mut usize, converted_files: &mut usize) -> Result<()> {
     if !path.exists() {
-        return Err(anyhow::anyhow!("Path does not exist: {:?}", path));
+        return Err(anyhow::anyhow!("Path does not exist: {}", path.display()));
     }
 
     if path.is_file() {
-        trace!("Path is a file: {:?}", path);
+        trace!("Path is a file: {}", path.display());
         if let Err(e) = process_file(path, args.dry_run, total_files, converted_files) {
-            error!("Error processing file {:?}: {}", path, e);
+            error!("Error processing file {path}: {e}", path = path.display());
         }
     } else if path.is_dir() {
-        trace!("Path is a directory: {:?}", path);
+        trace!("Path is a directory: {}", path.display());
         process_directory(path, args, total_files, converted_files)?;
     } else {
-        warn!("Path is neither a file nor a directory: {:?}", path);
+        warn!("Path is neither a file nor a directory: {}", path.display());
     }
 
     Ok(())
 }
 
 /// Process all files in a directory
-fn process_directory(
-    dir: &Path,
-    args: &Args,
-    total_files: &mut usize,
-    converted_files: &mut usize,
-) -> Result<()> {
+fn process_directory(dir: &Path, args: &Args, total_files: &mut usize, converted_files: &mut usize) -> Result<()> {
     debug!("Processing directory: {:?}", dir);
 
     let walker = if args.recursive {
@@ -115,22 +103,16 @@ fn process_directory(
             Ok(entry) => {
                 let path = entry.path();
 
-                // Skip hidden files/directories if requested
-                if args.skip_hidden && is_hidden(path) {
-                    trace!("Skipping hidden path: {:?}", path);
-                    continue;
-                }
-
                 // Skip directories themselves, we only process files
                 if path.is_file() {
-                    trace!("Found file in directory: {:?}", path);
+                    trace!("Found file in directory: {}", path.display());
                     if let Err(e) = process_file(path, args.dry_run, total_files, converted_files) {
-                        error!("Error processing file {:?}: {}", path, e);
+                        error!("Error processing file {path}: {e}", path = path.display());
                     }
                 }
             }
             Err(e) => {
-                warn!("Error walking directory entry: {}", e);
+                warn!("Error walking directory entry: {e}");
             }
         }
     }
@@ -138,115 +120,55 @@ fn process_directory(
     Ok(())
 }
 
-/// Check if a path is hidden (starts with a dot)
-fn is_hidden(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.starts_with('.'))
-        .unwrap_or(false)
-}
-
 /// Process a single file
-fn process_file(
-    path: &Path,
-    dry_run: bool,
-    total_files: &mut usize,
-    converted_files: &mut usize,
-) -> Result<()> {
-    trace!("Checking if file is text: {:?}", path);
-
-    // Check if file is a text file
-    if !is_text_file(path)? {
-        trace!("File is not a text file, skipping: {:?}", path);
+fn process_file(path: &Path, dry_run: bool, total_files: &mut usize, converted_files: &mut usize) -> Result<()> {
+    // Check if this file is a text file
+    trace!("Checking if file is text: {}", path.display());
+    if is_binary(path)? {
+        trace!("File is not a text file, skipping: {}", path.display());
         return Ok(());
     }
 
-    debug!("Processing text file: {:?}", path);
+    debug!("Processing text file: {}", path.display());
     *total_files += 1;
 
     // Read file content
-    let content = fs::read(path)
-        .with_context(|| format!("Failed to read file: {:?}", path))?;
-
+    let content = fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
     trace!("Read {} bytes from file", content.len());
 
-    // Check if file contains CRLF
+    // Check if the file contains CRLF
     if !content.windows(2).any(|w| w == b"\r\n") {
-        trace!("File does not contain CRLF, skipping: {:?}", path);
+        trace!("File does not contain CRLF, skipping: {}", path.display());
         return Ok(());
     }
 
-    debug!("File contains CRLF line endings: {:?}", path);
+    debug!("File contains CRLF line endings: {}", path.display());
 
     // Convert CRLF to LF
     let converted = convert_crlf_to_lf(&content);
 
     if converted.len() == content.len() {
-        trace!("No changes after conversion (already LF only): {:?}", path);
+        trace!("No changes after conversion (already LF only): {}", path.display());
         return Ok(());
     }
 
     let bytes_saved = content.len() - converted.len();
-    debug!("Conversion will reduce file size by {} bytes", bytes_saved);
+    debug!("Conversion will reduce file size by {bytes_saved} bytes");
 
     if dry_run {
-        info!("[DRY RUN] Would convert: {:?} ({} bytes saved)", path, bytes_saved);
+        info!(
+            "[DRY RUN] Would convert: {path} ({bytes_saved} bytes saved)",
+            path = path.display()
+        );
     } else {
-        // Write converted content back to file
-        fs::write(path, &converted)
-            .with_context(|| format!("Failed to write file: {:?}", path))?;
+        // Write converted content back to the file
+        fs::write(path, &converted).with_context(|| format!("Failed to write file: {}", path.display()))?;
 
-        info!("Converted: {:?} ({} bytes saved)", path, bytes_saved);
+        debug!("Converted: {path} ({bytes_saved} bytes saved)", path = path.display());
     }
 
     *converted_files += 1;
     Ok(())
-}
-
-/// Check if a file is a text file using file-format crate
-fn is_text_file(path: &Path) -> Result<bool> {
-    trace!("Detecting file format for: {:?}", path);
-
-    // Try to determine file format
-    match file_format::FileFormat::from_file(path) {
-        Ok(format) => {
-            let media_type = format.media_type();
-            trace!("Detected media type: {}", media_type);
-
-            // Check if media type starts with "text/"
-            let is_text = media_type.starts_with("text/");
-
-            // Also accept some common programming file extensions
-            // that might not be detected as text
-            let is_code = matches!(
-                path.extension().and_then(|s| s.to_str()),
-                Some("rs" | "toml" | "json" | "yaml" | "yml" | "md" | "txt" | 
-                     "sh" | "py" | "js" | "ts" | "c" | "cpp" | "h" | "hpp" |
-                     "java" | "go" | "rb" | "php" | "cs" | "swift" | "kt")
-            );
-
-            trace!("Is text: {}, Is code: {}", is_text, is_code);
-            Ok(is_text || is_code)
-        }
-        Err(e) => {
-            trace!("Failed to detect file format: {}", e);
-            // If detection fails, check by extension as fallback
-            let is_code = matches!(
-                path.extension().and_then(|s| s.to_str()),
-                Some("rs" | "toml" | "json" | "yaml" | "yml" | "md" | "txt" | 
-                     "sh" | "py" | "js" | "ts" | "c" | "cpp" | "h" | "hpp" |
-                     "java" | "go" | "rb" | "php" | "cs" | "swift" | "kt")
-            );
-
-            if is_code {
-                trace!("Treating as text based on extension");
-                Ok(true)
-            } else {
-                trace!("Cannot determine if file is text, skipping");
-                Ok(false)
-            }
-        }
-    }
 }
 
 /// Convert CRLF line endings to LF
@@ -298,13 +220,5 @@ mod tests {
         let expected = b"Hello\nWorld\nTest\n";
         let result = convert_crlf_to_lf(input);
         assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_is_hidden() {
-        assert!(is_hidden(Path::new(".hidden")));
-        assert!(is_hidden(Path::new(".gitignore")));
-        assert!(!is_hidden(Path::new("visible.txt")));
-        assert!(!is_hidden(Path::new("file")));
     }
 }

@@ -1,19 +1,23 @@
 [package]
 name = "no-crlf"
-version = "1.0.0"
+version = "1.0.3"
 edition = "2024"
 authors = ["Frédéric Meyer <frederic.meyer.77@gmail.com>"]
 description = "A CLI tool to convert CRLF line endings to LF in text files"
-license = "MIT"
-repository = "https://github.com/yourusername/crlf2lf"
+license-file = "LICENSE"
+repository = "https://github.com/corebreaker/no-crlf"
 keywords = ["cli", "crlf", "lf", "line-endings", "converter"]
 categories = ["command-line-utilities", "text-processing"]
 readme = "README.md"
+
+# To execute these commands with `cargo do`, e.g.: `cargo do fmt`, execute previously: `cargo install cargo-run-script`
+[workspace.metadata.scripts]
+fmt = "cargo +nightly fmt --all"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
-file-format = "0.28.0"
+binaryornot = "1.0.0"
 anyhow = "1.0"
 walkdir = "2.5"

@@ -1,5 +1,4 @@
 [![Crates.io]](https://crates.io/crates/no-crlf)
-[![Docs.rs]](https://docs.rs/no-crlf/)
 [![License: MIT]](https://opensource.org/licenses/MIT)
 
 # no-crlf
